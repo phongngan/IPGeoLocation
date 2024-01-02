@@ -83,7 +83,7 @@ def main():
     #init lib
     ipGeoLocRequest = IpGeoLocationLib(args.target, logger, args.noprint)
     
-    print(banner)
+    # print(banner)
     
     #retrieve information
     if not ipGeoLocRequest.GetInfo(args.uagent, args.tlist, 

@@ -63,3 +63,4 @@ RemoteSystemsTempFiles
 .metadata
 .settings
 *.prefs
+venv/
