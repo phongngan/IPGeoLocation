@@ -35,12 +35,22 @@ from time import sleep
 from core.FileExporter import FileExporter
 from urllib.parse import urlparse
 from urllib import request
+import threading
+import time
 
 
 class IpGeoLocationLib:
     """Retrieve IP Geolocation information from http://ip-api.com"""
 
     def __init__(self, target, logger, noprint=False, nolog=False, verbose=False):
+        self.targetCount = 0
+        self.max_threads = 20
+        self.countLock = threading.Lock()
+        self.IpGeoLocObjs = []
+        self.threads = []
+        self.requestLock = threading.Lock()
+        self.printLock = threading.Lock()
+        self.latestTime = time.time()
         self.URL = 'http://ip-api.com'
         self.RequestURL = self.URL + '/json/{}'
         self.BOLD = '\033[1m'
@@ -92,6 +102,8 @@ class IpGeoLocationLib:
             results = None
             if self.TargetsFile:
                 results = self.__retrieveGeolocations()
+                # for r in results:
+                #     print(r)
 
             else:
                 results = self.__retrieveGeolocation(self.Target)
@@ -199,16 +211,39 @@ class IpGeoLocationLib:
         if not success:
             self.Logger.PrintError('Saving results to {} text file failed.'.format(txtFile))
 
+    def __mulRetrieve(self):
+        targetLen = len(self.Targets)
+        idx = 0
+        target = None
+
+        while True:
+            # print("x")
+            with self.countLock:
+                idx = self.targetCount
+                self.targetCount += 1
+            if self.targetCount > targetLen:
+                break
+            res = False
+            target = self.Targets[idx]
+            try:
+                res = self.__retrieveGeolocation(target)
+            except:
+                res = False
+                self.Logger.Print(target)
+            if not res:
+                continue
+            self.IpGeoLocObjs.append(res)
+
     def __retrieveGeolocations(self):
         """Retrieve IP Geolocation for each target in the list"""
-        IpGeoLocObjs = []
-
-        for target in self.Targets:
-            IpGeoLocObjs.append(self.__retrieveGeolocation(target))
-            if len(self.Targets) >= 150:
-                sleep(.500)  # 1/2 sec - ip-api will automatically ban any IP address doing over 150 requests per minute
-
-        return IpGeoLocObjs
+        m = min(self.max_threads,len(self.Targets))
+        for i in range(m):
+            thread = threading.Thread(target=self.__mulRetrieve, args=())
+            self.threads.append(thread)
+            thread.start()
+        for thread in self.threads:
+            thread.join()
+        return self.IpGeoLocObjs
 
     def __retrieveGeolocation(self, target):
         """Retrieve IP Geolocation for single target"""
@@ -237,6 +272,12 @@ class IpGeoLocationLib:
             self.__pickRandomProxy()
 
         self.Logger.Print('Retrieving {} Geolocation..'.format(query))
+        with self.requestLock:
+            c_time = time.time()
+            n_s = c_time - self.latestTime
+            if n_s < 0.4:
+                sleep(0.4 - n_s)
+                self.latestTime = time.time()
 
         req = request.Request(self.RequestURL.format(target), data=None, headers={
             'User-Agent': self.UserAgent
@@ -256,7 +297,8 @@ class IpGeoLocationLib:
 
             if not self.NoPrint:
                 # self.Logger.PrintIPGeoLocation(ipGeoLocObj)
-                print({
+                with self.printLock:
+                    print({
                     "target": ipGeoLocObj.Query,
                     "ip": ipGeoLocObj.IP,
                     "asn": ipGeoLocObj.ASN,
@@ -274,7 +316,25 @@ class IpGeoLocationLib:
                     "googleMaps": ipGeoLocObj.GoogleMapsLink,
                 })
 
-            return ipGeoLocObj
+                return {
+                    "target": ipGeoLocObj.Query,
+                    "ip": ipGeoLocObj.IP,
+                    "asn": ipGeoLocObj.ASN,
+                    "city": ipGeoLocObj.City,
+                    "country": ipGeoLocObj.Country,
+                    "countryCode": ipGeoLocObj.CountryCode,
+                    "isp": ipGeoLocObj.ISP,
+                    "latitude": ipGeoLocObj.Latitude,
+                    "longtitude": ipGeoLocObj.Longtitude,
+                    "organization": ipGeoLocObj.Organization,
+                    "regionCode": ipGeoLocObj.Region,
+                    "regionName": ipGeoLocObj.RegionName,
+                    "timezone": ipGeoLocObj.Timezone,
+                    "zipCode": ipGeoLocObj.Zip,
+                    "googleMaps": ipGeoLocObj.GoogleMapsLink,
+                }
+
+            # return ipGeoLocObj
 
         return False
 
